@@ -1,0 +1,26 @@
+services:
+  internxt-webdav:
+    image: internxt-webdav:latest
+    container_name: internxt-webdav
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Europe/Paris
+      - WEBDAV_USERNAME=admin
+      - WEBDAV_PASSWORD=${WEBDAV_PASSWORD:-changeme}
+      - INTERXT_CREDENTIALS_FILE=/run/secrets/internxt_credentials
+    secrets:
+      - internxt_credentials
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+secrets:
+  internxt_credentials:
+    file: /home/sebastien/.internxt-tools/credentials.json
