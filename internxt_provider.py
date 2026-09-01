@@ -334,8 +334,11 @@ class InternxtProvider(DAVProvider):
                 self.credentials["user_id"],
             )
             return 201
+        except SystemExit as e:
+            logger.error(f"Upload SystemExit: {e}")
+            return 500
         except Exception as e:
-            logger.error(f"Upload failed: {e}")
+            logger.error(f"Upload failed: {e}", exc_info=True)
             return 500
         finally:
             # Cleanup
@@ -345,12 +348,16 @@ class InternxtProvider(DAVProvider):
         """Create a folder"""
         # Check parent exists
         parent_path = DAVPath("/" + "/".join(request.dist_src_path.parts[:-1]))
+        logger.info(f"MKCOL request: path={request.dist_src_path}, parent={parent_path}")
+        
         parent_uuid, _, parent_is_folder = await self._resolve_path(parent_path)
         
         if parent_uuid is None or not parent_is_folder:
+            logger.error(f"MKCOL parent not found or not a folder: {parent_path}")
             return 409
         
         folder_name = request.dist_src_path.parts[-1]
+        logger.info(f"MKCOL creating '{folder_name}' in parent {parent_uuid}")
         
         try:
             # Get parent metadata
@@ -365,19 +372,25 @@ class InternxtProvider(DAVProvider):
                 "parentFolderUuid": parent_uuid,
             })
             
+            logger.info(f"MKCOL success: '{folder_name}' created")
             return 201
+        except SystemExit as e:
+            # internxt.py appelle sys.exit() via _die()
+            # Si c'est un 409 (dossier existe déjà), retourner 405 (WebDAV standard)
+            logger.warning(f"MKCOL SystemExit (dossier existe probablement déjà): {e}")
+            return 405  # Method Not Allowed (standard WebDAV pour "déjà existant")
         except Exception as e:
-            logger.error(f"MKCOL failed: {e}")
+            logger.error(f"MKCOL failed: {e}", exc_info=True)
             return 500
 
     async def _do_delete(self, request: DAVRequest) -> int:
         """Delete a file or folder"""
-        uuid, name, is_folder = await self._resolve_path(request.dist_src_path)
-        
-        if uuid is None:
-            return 404
-        
         try:
+            uuid, name, is_folder = await self._resolve_path(request.dist_src_path)
+            
+            if uuid is None:
+                return 404
+            
             if is_folder:
                 # Delete folder
                 self.client.delete(f"/folders/{uuid}")
@@ -386,8 +399,11 @@ class InternxtProvider(DAVProvider):
                 self.client.delete(f"/files/{uuid}")
             
             return 204
+        except SystemExit as e:
+            logger.warning(f"DELETE SystemExit: {e}")
+            return 404
         except Exception as e:
-            logger.error(f"DELETE failed: {e}")
+            logger.error(f"DELETE failed: {e}", exc_info=True)
             return 500
 
     async def _do_proppatch(self, request: DAVRequest) -> int:
