@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
     requests \
     cryptography \
     uvicorn \
-    tzdata
+    tzdata \
+    backports.zstd
 
 # Copy application files
 COPY internxt.py /app/internxt.py
