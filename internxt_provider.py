@@ -186,6 +186,18 @@ class InternxtProvider(DAVProvider):
         
         return dav_properties
 
+    async def _do_head(self, request: DAVRequest) -> tuple[int, DAVPropertyBasicData | None]:
+        """Get resource metadata (for healthcheck)"""
+        uuid, name, is_folder = await self._resolve_path(request.dist_src_path)
+        
+        if uuid is None:
+            return 404, None
+        
+        dav_property = await self._get_dav_property(
+            request, request.src_path, uuid, is_folder, name
+        )
+        return 200, dav_property.basic_data
+
     async def _do_get(self, request: DAVRequest) -> tuple[
         int,
         DAVPropertyBasicData | None,
