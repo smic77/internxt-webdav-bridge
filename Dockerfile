@@ -20,7 +20,6 @@ RUN pip install --no-cache-dir \
 COPY internxt.py /app/internxt.py
 COPY internxt_provider.py /app/internxt_provider.py
 COPY standalone.py /app/standalone.py
-COPY webdav.toml /app/webdav.toml
 
 # Create data directory
 RUN mkdir -p /data
