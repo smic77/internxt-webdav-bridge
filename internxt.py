@@ -158,16 +158,36 @@ class InternxtClient:
         return self._req("DELETE", path, **kwargs)
 
     def _req(self, method, path, base=None, **kwargs):
+        import time
         base = base or DRIVE_API
         url  = f"{base}{path}"
-        r    = self.session.request(method, url, **kwargs)
-        if not r.ok:
+        
+        # Retry logic for temporary errors (502, 503, 504)
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries + 1):
+            r = self.session.request(method, url, **kwargs)
+            
+            if r.ok:
+                return r.json() if r.content else {}
+            
+            # Check if it's a temporary error that we should retry
+            if r.status_code in [502, 503, 504] and attempt < max_retries:
+                print(f"⚠ Temporary error {r.status_code} on {method} {url}, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
+            
+            # Non-retryable error or max retries reached
             try:
                 err = r.json()
             except Exception:
                 err = r.text
             _die(f"Error {r.status_code} en {method} {url}: {err}")
-        return r.json() if r.content else {}
+        
+        # Should never reach here, but just in case
+        _die(f"Max retries reached for {method} {url}")
 
 
 # ── Autenticación ─────────────────────────────────────────────────────────────
