@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir \
 COPY internxt.py /app/internxt.py
 COPY internxt_provider.py /app/internxt_provider.py
 COPY standalone.py /app/standalone.py
+COPY healthcheck.py /app/healthcheck.py
 
 # Create data directory
 RUN mkdir -p /data
@@ -30,8 +31,9 @@ RUN mkdir -p /data
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8000/ || exit 1
+# Authenticated PROPFIND using WEBDAV_USERNAME / WEBDAV_PASSWORD from the environment
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD ["python", "/app/healthcheck.py"]
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

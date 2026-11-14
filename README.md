@@ -137,7 +137,7 @@ Pour tester localement sans Docker:
 ```bash
 cd internxt-dav
 pip install asgi-webdav requests cryptography uvicorn
-export INTERXT_CREDENTIALS_FILE=/home/sebastien/.internxt-tools/credentials.json
+export INTERNXT_CREDENTIALS_FILE=/home/sebastien/.internxt-tools/credentials.json
 python standalone.py
 ```
 

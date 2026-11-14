@@ -41,15 +41,20 @@ class InternxtProvider(DAVProvider):
         # Load credentials from file
         # Try to get from environment variable first, then from config
         import os
-        credentials_file = os.environ.get("INTERXT_CREDENTIALS_FILE")
-        
+        # INTERNXT_CREDENTIALS_FILE is the documented name; INTERXT_CREDENTIALS_FILE
+        # (historical typo) is still accepted for backward compatibility.
+        credentials_file = (
+            os.environ.get("INTERNXT_CREDENTIALS_FILE")
+            or os.environ.get("INTERXT_CREDENTIALS_FILE")
+        )
+
         if not credentials_file:
             # Try to get from kwargs (passed via config)
             credentials_file = kwargs.get("credentials_file")
-        
+
         if not credentials_file:
             raise DAVExceptionProviderInitFailed(
-                "InternxtProvider requires 'INTERXT_CREDENTIALS_FILE' environment variable or 'credentials_file' parameter"
+                "InternxtProvider requires 'INTERNXT_CREDENTIALS_FILE' environment variable or 'credentials_file' parameter"
             )
         
         try:
