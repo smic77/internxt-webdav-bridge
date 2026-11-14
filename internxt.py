@@ -38,7 +38,14 @@ APP_CRYPTO_SECRET = "6KYQBP847D4ATSFA"
 CLIENT_NAME       = "internxt-cli"
 CLIENT_VERSION    = "1.6.3"
 
-CONFIG_FILE = Path.home() / ".internxt-tools" / "credentials.json"
+# Fichier d'identifiants : INTERNXT_CREDENTIALS_FILE s'il est défini (cas Docker,
+# pour que `internxt.py login` écrive dans le fichier lu par le serveur WebDAV),
+# sinon ~/.internxt-tools/credentials.json
+CONFIG_FILE = Path(
+    os.environ.get("INTERNXT_CREDENTIALS_FILE")
+    or os.environ.get("INTERXT_CREDENTIALS_FILE")
+    or Path.home() / ".internxt-tools" / "credentials.json"
+)
 
 # ── Criptografía (CryptoJS-compatible AES + PBKDF2) ──────────────────────────
 

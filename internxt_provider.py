@@ -99,13 +99,45 @@ class InternxtProvider(DAVProvider):
         def log(msg: str) -> None:
             (logger.warning if msg.startswith(("⚠", "✗")) else logger.info)(msg)
 
+        def reload_if_changed() -> None:
+            """Recharge credentials.json s'il a été modifié (ex. nouveau login)."""
+            try:
+                mtime = self.credentials_file.stat().st_mtime
+            except OSError:
+                return
+            if mtime == getattr(self, "_credentials_mtime", None):
+                return
+            first = not hasattr(self, "_credentials_mtime")
+            self._credentials_mtime = mtime
+            if first:
+                return
+            try:
+                with open(self.credentials_file, "r") as f:
+                    new_creds = json.load(f)
+            except Exception as e:
+                logger.warning(f"Relecture de {self.credentials_file} impossible : {e}")
+                return
+            if new_creds.get("new_token") != self.credentials.get("new_token"):
+                self.credentials.clear()
+                self.credentials.update(new_creds)
+                self.client.set_token(
+                    new_creds.get("new_token") or new_creds["token"], new_creds.get("token")
+                )
+                logger.info(f"Nouveau jeton chargé depuis {self.credentials_file}")
+
         def check() -> None:
+            reload_if_changed()
             status, remaining = self.internxt.token_status(
                 self.credentials.get("new_token") or self.credentials.get("token")
             )
             if remaining is not None:
+                import datetime
+                exp = datetime.datetime.now() + datetime.timedelta(seconds=remaining)
+                when = (f"expire dans {remaining / 86400:.1f} j" if remaining > 0
+                        else f"expiré depuis {-remaining / 86400:.1f} j")
                 logger.info(
-                    f"Jeton Internxt : {status}, expire dans {remaining / 86400:.1f} j"
+                    f"Jeton Internxt ({self.credentials_file}) : {status}, {when} "
+                    f"(le {exp:%Y-%m-%d %H:%M})"
                 )
             self.internxt.refresh_if_needed(
                 self.client, self.credentials, self.credentials_file, log=log

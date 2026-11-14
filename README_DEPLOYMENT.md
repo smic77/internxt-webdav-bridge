@@ -146,7 +146,15 @@ Le pont renouvelle lui-même son jeton Internxt, comme le CLI officiel :
 mémoire et sera perdu au redémarrage (un avertissement l'indique dans les logs).
 
 Un jeton **déjà expiré** ne peut pas être renouvelé (par exemple si le conteneur est resté
-arrêté longtemps) : il faut alors refaire `python internxt.py login` et redémarrer.
+arrêté longtemps). Il faut refaire un login, directement dans le conteneur :
+
+```bash
+docker exec -it internxt-webdav python /app/internxt.py login
+```
+
+`internxt.py` utilise `INTERNXT_CREDENTIALS_FILE` : le login écrit donc dans le fichier
+monté, lu par le serveur. Le nouveau jeton est pris en compte à la vérification suivante
+(au plus tard après `INTERNXT_TOKEN_CHECK_INTERVAL`), ou immédiatement après un redémarrage.
 
 Logs attendus :
 ```
