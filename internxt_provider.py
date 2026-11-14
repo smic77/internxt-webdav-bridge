@@ -82,6 +82,54 @@ class InternxtProvider(DAVProvider):
         
         logger.info(f"InternxtProvider initialized for user: {self.credentials.get('email')}")
 
+        # Renouvellement préventif du jeton : au démarrage, puis périodiquement
+        self.credentials_file = Path(credentials_file)
+        self._start_token_refresher()
+
+    def _start_token_refresher(self) -> None:
+        import os
+        import threading
+
+        try:
+            interval = int(os.environ.get("INTERNXT_TOKEN_CHECK_INTERVAL", "3600"))
+        except ValueError:
+            interval = 3600
+        interval = max(interval, 60)
+
+        def log(msg: str) -> None:
+            (logger.warning if msg.startswith(("⚠", "✗")) else logger.info)(msg)
+
+        def check() -> None:
+            status, remaining = self.internxt.token_status(
+                self.credentials.get("new_token") or self.credentials.get("token")
+            )
+            if remaining is not None:
+                logger.info(
+                    f"Jeton Internxt : {status}, expire dans {remaining / 86400:.1f} j"
+                )
+            self.internxt.refresh_if_needed(
+                self.client, self.credentials, self.credentials_file, log=log
+            )
+
+        # Vérification immédiate (synchrone, avant de servir des requêtes)
+        try:
+            check()
+        except Exception as e:  # ne jamais empêcher le démarrage
+            logger.warning(f"Vérification du jeton Internxt impossible : {e}")
+
+        stop = threading.Event()
+
+        def loop() -> None:
+            while not stop.wait(interval):
+                try:
+                    check()
+                except Exception as e:
+                    logger.warning(f"Vérification du jeton Internxt impossible : {e}")
+
+        self._token_refresher_stop = stop
+        threading.Thread(target=loop, name="internxt-token-refresher", daemon=True).start()
+        logger.info(f"Renouvellement préventif du jeton actif (vérification toutes les {interval} s)")
+
     def __repr__(self) -> str:
         return f"internxt://{self.credentials.get('email', 'unknown')}"
 

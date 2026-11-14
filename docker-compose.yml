@@ -9,13 +9,12 @@ services:
       - TZ=Europe/Paris
       - WEBDAV_USERNAME=admin
       - WEBDAV_PASSWORD=${WEBDAV_PASSWORD:-changeme}
-      - INTERNXT_CREDENTIALS_FILE=/run/secrets/internxt_credentials
-    secrets:
-      - internxt_credentials
+      - INTERNXT_CREDENTIALS_FILE=/credentials/credentials.json
+      # Vérification du jeton Internxt (secondes) ; renouvelé à mi-vie
+      - INTERNXT_TOKEN_CHECK_INTERVAL=3600
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      # Lecture-écriture : le jeton renouvelé est réenregistré dans ce fichier
+      - /home/sebastien/.internxt-tools/credentials.json:/credentials/credentials.json:rw
     # healthcheck: défini dans le Dockerfile (PROPFIND authentifié)
 
-secrets:
-  internxt_credentials:
-    file: /home/sebastien/.internxt-tools/credentials.json

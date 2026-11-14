@@ -142,6 +142,12 @@ class InternxtClient:
             "Content-Type":     "application/json",
         })
 
+    def set_token(self, new_token: str, token: str | None = None) -> None:
+        """Remplace le jeton utilisé par la session (après renouvellement)."""
+        self.new_token = new_token
+        self.token     = token or new_token
+        self.session.headers["Authorization"] = f"Bearer {new_token}"
+
     def get(self, path, **kwargs):
         return self._req("GET", path, **kwargs)
 
@@ -179,6 +185,12 @@ class InternxtClient:
                 retry_delay *= 2  # Exponential backoff
                 continue
             
+            if r.status_code == 401:
+                _die(
+                    f"Error 401 en {method} {url}: jeton Internxt expiré ou invalide. "
+                    "Régénérez credentials.json avec 'python internxt.py login'."
+                )
+
             # Non-retryable error or max retries reached
             try:
                 err = r.json()
@@ -334,6 +346,145 @@ def _client() -> tuple[InternxtClient, dict]:
     creds  = _load_creds()
     client = InternxtClient(creds["token"], creds.get("new_token"))
     return client, creds
+
+
+# ── Renovación preventiva del token ───────────────────────────────────────────
+#
+# Misma lógica que el CLI oficial (@internxt/lib checkTokenExpiration):
+# se renueva cuando queda <= 50 % de la vida del JWT (exp - iat), o 6 h si el
+# token no lleva 'iat'. La renovación usa GET /users/refresh con el token aún
+# válido (endpoint web; /users/cli/refresh está restringido por plan).
+# Un token ya caducado NO se puede renovar: hay que volver a hacer login.
+
+TOKEN_VALID            = "VALID"
+TOKEN_REFRESH_REQUIRED = "REFRESH_REQUIRED"
+TOKEN_EXPIRED          = "EXPIRED"
+TOKEN_INVALID          = "INVALID"
+
+_FALLBACK_REFRESH_SECONDS = 6 * 60 * 60
+
+
+def _jwt_claims(token: str) -> dict | None:
+    """Decodifica (sin verificar firma) el payload de un JWT."""
+    import base64
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return None
+
+
+def token_status(token: str | None, now: float | None = None) -> tuple[str, int | None]:
+    """Devuelve (estado, segundos_restantes)."""
+    import time
+    claims = _jwt_claims(token or "")
+    if not claims or not isinstance(claims.get("exp"), (int, float)):
+        return TOKEN_INVALID, None
+    now       = time.time() if now is None else now
+    exp       = claims["exp"]
+    iat       = claims.get("iat")
+    remaining = int(exp - now)
+    if remaining <= 0:
+        return TOKEN_EXPIRED, remaining
+    threshold = (exp - iat) / 2 if isinstance(iat, (int, float)) else _FALLBACK_REFRESH_SECONDS
+    if remaining <= threshold:
+        return TOKEN_REFRESH_REQUIRED, remaining
+    return TOKEN_VALID, remaining
+
+
+def _save_creds(creds: dict, path: Path) -> None:
+    """
+    Escribe las credenciales. Se escribe en el mismo fichero (sin rename)
+    porque en Docker suele ser un bind-mount de un único fichero.
+    """
+    data = json.dumps(creds, indent=2)
+    with open(path, "r+", encoding="utf-8") as f:
+        f.seek(0)
+        f.write(data)
+        f.truncate()
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def refresh_token(client: InternxtClient, creds: dict) -> dict:
+    """
+    Pide un token nuevo con el token actual. Actualiza `creds` y el cliente.
+    Conserva el mnemónico y los campos locales; lanza RuntimeError si falla.
+    """
+    r = client.session.get(f"{DRIVE_API}/users/refresh", timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"Error {r.status_code} en GET /users/refresh: {r.text[:300]}")
+    data      = r.json()
+    new_token = data.get("newToken")
+    if not new_token:
+        raise RuntimeError(f"Respuesta inesperada de /users/refresh: {list(data)}")
+
+    creds["new_token"] = new_token
+    creds["token"]     = data.get("oldToken") or data.get("token") or new_token
+    user = data.get("user")
+    if isinstance(user, dict):
+        merged = dict(creds.get("user") or {})
+        merged.update({k: v for k, v in user.items() if k != "mnemonic"})
+        creds["user"] = merged
+    client.set_token(creds["new_token"], creds["token"])
+    return creds
+
+
+def refresh_if_needed(
+    client: InternxtClient,
+    creds: dict,
+    path: Path | None = None,
+    force: bool = False,
+    log=print,
+) -> bool:
+    """
+    Renueva el token si hace falta (o si force=True) y lo guarda en `path`.
+    Devuelve True si se renovó. Nunca termina el proceso (no usa _die).
+    """
+    status, remaining = token_status(creds.get("new_token") or creds.get("token"))
+
+    if status == TOKEN_EXPIRED:
+        log("✗ Jeton Internxt expiré : impossible de le renouveler. "
+            "Régénérez credentials.json avec 'python internxt.py login'.")
+        return False
+    if status == TOKEN_VALID and not force:
+        return False
+    if status == TOKEN_INVALID and not force:
+        log("⚠ Jeton Internxt illisible (pas un JWT) : renouvellement préventif impossible.")
+        return False
+
+    try:
+        refresh_token(client, creds)
+    except Exception as e:
+        log(f"⚠ Échec du renouvellement du jeton Internxt : {e}")
+        return False
+
+    new_status, new_remaining = token_status(creds["new_token"])
+    days = (new_remaining or 0) / 86400
+    if path is not None:
+        try:
+            _save_creds(creds, path)
+            log(f"✓ Jeton Internxt renouvelé (valide encore {days:.1f} j), enregistré dans {path}")
+        except OSError as e:
+            log(f"⚠ Jeton Internxt renouvelé en mémoire seulement (valide {days:.1f} j) : "
+                f"écriture impossible dans {path} ({e}). Montez le fichier en lecture-écriture.")
+    else:
+        log(f"✓ Jeton Internxt renouvelé (valide encore {days:.1f} j)")
+    return True
+
+
+def cmd_refresh(args):
+    """Renueva el token guardado (CLI)."""
+    client, creds = _client()
+    status, remaining = token_status(creds.get("new_token") or creds.get("token"))
+    if remaining is not None:
+        print(f"Estado del token: {status} (quedan {remaining / 86400:.1f} días)")
+    if not refresh_if_needed(client, creds, CONFIG_FILE, force=args.force):
+        if status == TOKEN_VALID and not args.force:
+            print("El token todavía es válido; usa --force para renovarlo igualmente.")
+        else:
+            sys.exit(1)
 
 
 # ── Resolución de rutas ───────────────────────────────────────────────────────
@@ -1113,6 +1264,8 @@ Ejemplos:
     # login
     sub.add_parser("login", help="Iniciar sesión con email/contraseña")
     sub.add_parser("token", help="Guardar token extraído del navegador")
+    rf_p = sub.add_parser("refresh", help="Renovar el token guardado (si queda <= 50 % de su vida)")
+    rf_p.add_argument("--force", action="store_true", help="Renovar aunque todavía no haga falta")
 
     # ls
     ls_p = sub.add_parser("ls", help="Listar carpeta")
@@ -1175,6 +1328,7 @@ Ejemplos:
     dispatch = {
         "login":    cmd_login,
         "token":    cmd_token,
+        "refresh":  cmd_refresh,
         "ls":       cmd_ls,
         "mkdir":    cmd_mkdir,
         "mv":       cmd_mv,

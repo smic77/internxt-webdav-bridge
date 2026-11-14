@@ -6,7 +6,7 @@ Tout est maintenant dans **2 fichiers**:
 - `docker-compose.yml` → configuration complète de la stack
 - `.env` → mot de passe WebDAV (optionnel, valeur par défaut dans docker-compose.yml)
 
-Les credentials Internxt sont montées via Docker secrets depuis le serveur hôte.
+Les credentials Internxt sont montées (en lecture-écriture) depuis le serveur hôte.
 
 ## Étape 1: Préparer les credentials Internxt sur le serveur
 
@@ -130,6 +130,34 @@ Stack → **Pull and redeploy** (cocher *Re-pull image*).
 cd /home/sebastien/internxt-dav
 docker-compose up -d
 ```
+
+## Renouvellement automatique du jeton Internxt
+
+Le pont renouvelle lui-même son jeton Internxt, comme le CLI officiel :
+
+- au démarrage, puis toutes les `INTERNXT_TOKEN_CHECK_INTERVAL` secondes (3600 par défaut),
+  il lit la date d'expiration du jeton (JWT) ;
+- dès qu'il reste **≤ 50 % de sa durée de vie**, il demande un nouveau jeton à Internxt
+  (`GET /users/refresh`) avec le jeton encore valide — ni mot de passe ni 2FA nécessaires ;
+- le nouveau jeton est **réécrit dans `credentials.json`**.
+
+⚠️ Le fichier doit donc être monté **en lecture-écriture** (`:rw`, pas `:ro`, et pas en
+`secrets:` Docker qui est toujours en lecture seule). Sinon le jeton n'est renouvelé qu'en
+mémoire et sera perdu au redémarrage (un avertissement l'indique dans les logs).
+
+Un jeton **déjà expiré** ne peut pas être renouvelé (par exemple si le conteneur est resté
+arrêté longtemps) : il faut alors refaire `python internxt.py login` et redémarrer.
+
+Logs attendus :
+```
+Jeton Internxt : VALID, expire dans 23.4 j
+Renouvellement préventif du jeton actif (vérification toutes les 3600 s)
+...
+Jeton Internxt : REFRESH_REQUIRED, expire dans 14.9 j
+✓ Jeton Internxt renouvelé (valide encore 30.0 j), enregistré dans /credentials/credentials.json
+```
+
+Renouvellement manuel (hors Docker) : `python internxt.py refresh` (ou `--force`).
 
 ## Étape 6: Vérifier le déploiement
 
@@ -277,7 +305,8 @@ curl -u admin:TON_MOT_DE_PASSE http://localhost:8000/
 # Vérifier le token
 cat /home/sebastien/.internxt-tools/credentials.json | jq .token
 
-# Si expiré, regénérer les credentials
+# Le pont renouvelle le jeton tout seul (voir « Renouvellement automatique du jeton »).
+# S'il est déjà expiré, regénérer les credentials :
 cd /home/sebastien/internxt-dav
 python3 internxt.py login
 ```
