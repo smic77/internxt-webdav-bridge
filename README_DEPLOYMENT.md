@@ -92,68 +92,37 @@ openssl rand -base64 32
 chmod 600 .env
 ```
 
-## Étape 4: Builder l'image Docker
+## Étape 4: Image Docker (construite par GitHub Actions)
 
-```bash
-cd /home/sebastien/internxt-dav
-docker build -t internxt-webdav:latest .
+L'image est construite automatiquement par GitHub Actions (`.github/workflows/docker.yml`)
+à chaque push sur `main` et publiée sur :
+
+```
+ghcr.io/smic77/internxt-webdav-bridge:latest      # dernière version de main
+ghcr.io/smic77/internxt-webdav-bridge:sha-<commit> # version figée
 ```
 
-Vérifier:
-```bash
-docker images | grep internxt-webdav
-```
+Plateformes : `linux/amd64` et `linux/arm64`. Aucun build n'est nécessaire sur le serveur.
+
+> Après le premier build, rendre le package public :
+> GitHub → profil → Packages → `internxt-webdav-bridge` → Package settings → Change visibility → Public.
+> (Sinon, ajouter `ghcr.io` comme registre dans Portainer avec un token GitHub `read:packages`.)
 
 ## Étape 5: Déployer via Portainer
 
-### Option A: Via Portainer UI
+### Option A: Via Portainer UI (depuis le dépôt Git)
 
-1. **Accéder à Portainer**
-   - URL: `https://PORTAINER_URL:9443`
-   - Sélectionner l'endpoint 3
+1. **Stacks → Add stack**, nom : `internxt-webdav`
+2. Build method : **Repository**
+   - Repository URL : `https://github.com/smic77/internxt-webdav-bridge`
+   - Repository reference : `refs/heads/main`
+   - Compose path : `docker-compose.yml`
+3. **Environment variables** : `WEBDAV_PASSWORD` = ton mot de passe (éviter le caractère `$`)
+4. (Optionnel) Activer **GitOps updates** et **Re-pull image** pour suivre les nouvelles versions
+5. **Deploy the stack**
 
-2. **Créer une Stack**
-   - Menu: Stacks → Add stack
-   - Nom: `internxt-webdav`
-   - Build method: Web editor
-
-3. **Copier le contenu de docker-compose.yml**
-
-```yaml
-services:
-  internxt-webdav:
-    image: internxt-webdav:latest
-    container_name: internxt-webdav
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      - TZ=Europe/Paris
-      - WEBDAV_USERNAME=admin
-      - WEBDAV_PASSWORD=${WEBDAV_PASSWORD:-changeme}
-      - INTERXT_CREDENTIALS_FILE=/run/secrets/internxt_credentials
-    secrets:
-      - internxt_credentials
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-secrets:
-  internxt_credentials:
-    file: /home/sebastien/.internxt-tools/credentials.json
-```
-
-4. **Ajouter les variables d'environnement**
-   - Environment variables:
-     - `WEBDAV_PASSWORD` = ton mot de passe
-
-5. **Déployer**
-   - Cliquer sur "Deploy the stack"
+Pour mettre à jour après un push : attendre la fin du workflow GitHub Actions, puis
+Stack → **Pull and redeploy** (cocher *Re-pull image*).
 
 ### Option B: Via ligne de commande
 
@@ -203,7 +172,7 @@ curl -X PROPFIND -u admin:TON_MOT_DE_PASSE http://localhost:8000/
 
 ✅ **docker-compose.yml** → toute la configuration de la stack  
 ✅ **Variables d'environnement** → mot de passe WebDAV (si défini dans Portainer)  
-✅ **Image Docker** → internxt-webdav:latest (à rebuilder si nécessaire)
+✅ **Image Docker** → ghcr.io/smic77/internxt-webdav-bridge:latest (construite par GitHub Actions)
 
 ### Ce qui doit être sauvegardé séparément
 
@@ -228,12 +197,8 @@ sudo chmod 600 /home/sebastien/.internxt-tools/credentials.json
 # 2. Redéployer la stack depuis Portainer
 # (la stack est sauvegardée dans Portainer)
 
-# 3. Rebuilder l'image si nécessaire
-cd /home/sebastien/internxt-dav
-docker build -t internxt-webdav:latest .
-
-# 4. Redémarrer
-docker-compose restart
+# 3. Redémarrer (Portainer : Stack → Pull and redeploy)
+docker compose pull && docker compose up -d
 ```
 
 ## Étape 7: Configurer Zerobyte
@@ -360,15 +325,10 @@ docker restart internxt-webdav
 ```bash
 cd /home/sebastien/internxt-dav
 
-# Mettre à jour les fichiers
-git pull  # ou scp/rsync
-
-# Rebuilder l'image
-docker build -t internxt-webdav:latest .
-
-# Redémarrer
-docker-compose down
-docker-compose up -d
+# Pousser les modifications sur main → GitHub Actions construit l'image
+# Puis sur le serveur (ou Portainer → Pull and redeploy) :
+docker compose pull
+docker compose up -d
 ```
 
 ## Monitoring
